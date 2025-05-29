@@ -27,17 +27,18 @@ pub fn main() !void {
     };
 
     var b: Board = .{};
-    var turn = std.Random.boolean(rand);
+    const first = std.Random.boolean(rand);
+    var turn = false;
     while (true) {
-        const r = players[@intFromBool(turn)].agent.move(&b);
+        const r = players[@intFromBool(first != turn)].agent.move(&b);
         b.print();
         if (r) break;
         turn = !turn;
     }
     if (b.winner) |w| {
         std.debug.print("{s} won!\n", .{switch (w) {
-            .white => players[0].name,
-            .black => players[1].name,
+            .white => players[@intFromBool(first)].name,
+            .black => players[@intFromBool(!first)].name,
         }});
     } else {
         std.debug.print("It was a tie.\n", .{});
