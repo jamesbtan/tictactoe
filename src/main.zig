@@ -1,6 +1,6 @@
 pub fn main() !void {
     const h = Human.agent();
-    //_ = h;
+    _ = h;
 
     var rng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
@@ -12,23 +12,24 @@ pub fn main() !void {
     const ra = rnd.agent();
 
     var mcts: MCTS = .{ .allr = std.heap.smp_allocator, .ag = ra };
+    defer mcts.deinit();
     const ma = mcts.agent();
 
     const players = [_]Player{
         .{
-            .name = "human",
-            .agent = h,
+            .name = "mcts1",
+            .agent = ma,
         },
 
         .{
-            .name = "mcts",
+            .name = "mcts2",
             .agent = ma,
         },
     };
 
     var b: Board = .{};
     //const first = std.Random.boolean(rand);
-    const first = true;
+    const first = false;
     var turn = false;
     while (true) {
         const r = players[@intFromBool(first != turn)].agent.move(&b);

@@ -20,6 +20,10 @@ const MCTSNode = struct {
 
 };
 
+pub fn deinit(self: *MCTS) void {
+    self.nodes.deinit(self.allr);
+}
+
 pub fn bestChild(self: MCTS, ind: usize) usize {
     const n = self.nodes.items[ind];
     std.debug.assert(n.children != null);
@@ -103,7 +107,7 @@ fn move(ctx: *anyopaque, b: *Board) bool {
     var mm: usize = 0;
     for (v, 0..) |V, m| {
         if (V == 0) continue;
-        std.debug.print("{}: {} / {}\n", .{m, self.nodes.items[i].wins, self.nodes.items[i].sims});
+        std.debug.print("{}: {} / {}\n", .{m+1, self.nodes.items[i].wins, self.nodes.items[i].sims});
         if (self.nodes.items[i].sims > ms) {
             ms = self.nodes.items[i].sims;
             mm = m;
