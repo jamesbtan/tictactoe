@@ -5,111 +5,108 @@ const MCTS = @This();
 
 allr: std.mem.Allocator,
 ag: Agent,
+nodes: std.ArrayListUnmanaged(MCTSNode) = .empty,
 
 const MCTSNode = struct {
+    const ChildSlice = struct {
+        off: usize,
+        len: usize,
+    };
     current: Board,
-    parent: ?*MCTSNode,
-    children: ?[]MCTSNode = null,
-    chmoves: ?[]usize = null,
+    parent: ?usize,
+    children: ?ChildSlice = null,
     wins: u32 = 0,
     sims: u32 = 0,
 
-    pub fn deinit(self: *MCTSNode, allr: std.mem.Allocator) void {
-        if (self.children) |*c| {
-            for (c.*) |*C| {
-                C.deinit(allr);
-            }
-            allr.free(self.children.?);
-        }
-    }
-
-    pub fn bestChild(self: MCTSNode) *MCTSNode {
-        std.debug.assert(self.children != null);
-        for (self.children.?) |*c| {
-            if (c.sims == 0) return c;
-        }
-        var mi: usize = 0;
-        var mv: f32 = 0;
-        for (self.children.?, 0..) |c, i| {
-            const fw: f32 = @floatFromInt(c.wins);
-            const fs: f32 = @floatFromInt(c.sims);
-            const fps: f32 = @floatFromInt(c.parent.?.sims);
-            const v = fw / fs + 1.4 * std.math.sqrt(std.math.log2(fps) / std.math.log2e / fs);
-            if (v > mv) {
-                mv = v;
-                mi = i;
-            }
-        }
-        return &self.children.?[mi];
-    }
 };
 
-fn expand(self: MCTS, r: *MCTSNode) void {
-    var c = r;
-    while (c.children != null) {
-        c = c.bestChild();
+pub fn bestChild(self: MCTS, ind: usize) usize {
+    const n = self.nodes.items[ind];
+    std.debug.assert(n.children != null);
+    const c = n.children.?;
+    for (self.nodes.items[c.off..][0..c.len], c.off..) |C, i| {
+        if (C.sims == 0) return i;
     }
-    const b = &c.current;
+    var mi: usize = c.off;
+    var mv: f32 = 0;
+    const fps: f32 = @floatFromInt(self.nodes.items[ind].sims);
+    for (self.nodes.items[c.off..][0..c.len], c.off..) |C, i| {
+        const fw: f32 = @floatFromInt(C.wins);
+        const fs: f32 = @floatFromInt(C.sims);
+        const v = fw / fs + 1.4 * std.math.sqrt(std.math.log2(fps) / std.math.log2e / fs);
+        if (v > mv) {
+            mv = v;
+            mi = i;
+        }
+    }
+    return mi;
+}
+
+fn expand(self: *MCTS) void {
+    var c: usize = 0;
+    while (self.nodes.items[c].children != null) {
+        c = self.bestChild(c);
+    }
+    const b = self.nodes.items[c].current;
     const n = 9 - b.filled;
     if (b.winner != null) {
-        backpropogate(c, 2);
+        self.backpropogate(c, 2);
         return;
     }
     if (n == 0) {
-        backpropogate(c, 1);
+        self.backpropogate(c, 1);
         return;
     }
     // add each valid move
-    const ch = self.allr.alloc(MCTSNode, n) catch unreachable;
+    self.nodes.items[c].children = .{ .off = self.nodes.items.len, .len = n };
+    const ch = self.nodes.addManyAsSlice(self.allr, n) catch unreachable;
     const v = b.validMoves();
     var i: usize = 0;
     for (v, 0..) |V, m| {
         if (V == 0) continue;
-        ch[i] = .{ .current = c.current, .parent = c };
+        ch[i] = .{ .current = self.nodes.items[c].current, .parent = c };
         _ = ch[i].current.move(m) catch unreachable;
         i += 1;
     }
-    c.children = ch;
-    const cc = c.bestChild();
-    var cb = cc.current;
+    const cc = self.bestChild(c);
+    var cb = self.nodes.items[cc].current;
     while (true) {
         if (cb.filled == 9 or cb.winner != null) break;
         _ = self.ag.move(&cb);
     }
     if (cb.winner) |w| {
-        backpropogate(cc, if (cc.current.turn == w) 2 else 0);
+        self.backpropogate(cc, if (self.nodes.items[cc].current.turn == w) 2 else 0);
     } else {
-        backpropogate(cc, 1);
+        self.backpropogate(cc, 1);
     }
 }
 
-fn backpropogate(n: *MCTSNode, v: u32) void {
-    var c: ?*MCTSNode = n;
+fn backpropogate(self: MCTS, n: usize, v: u32) void {
+    var c: ?usize = n;
     var t = v;
     while (c) |C| {
-        C.wins += t;
-        C.sims += 2;
+        self.nodes.items[C].wins += t;
+        self.nodes.items[C].sims += 2;
         t = 2 - t;
-        c = C.parent;
+        c = self.nodes.items[C].parent;
     }
 }
 
 fn move(ctx: *anyopaque, b: *Board) bool {
     const self: *MCTS = @ptrCast(@alignCast(ctx));
-    var r: MCTSNode = .{ .current = b.*, .parent = null };
-    defer r.deinit(self.allr);
-    for (0..10000) |_| self.expand(&r);
+    self.nodes.append(self.allr, .{ .current = b.*, .parent = null }) catch unreachable;
+    defer self.nodes.clearRetainingCapacity();
+    for (0..1000000) |_| self.expand();
     const v = b.validMoves();
-    var i: usize = 0;
+    var i: usize = 1;
     var ms: u32 = 0;
     var mm: usize = 0;
     for (v, 0..) |V, m| {
         if (V == 0) continue;
-        std.debug.print("{}: {} / {}\n", .{i, r.children.?[i].wins, r.children.?[i].sims});
-        if (r.children.?[i].sims > ms) {
-            ms = r.children.?[i].sims;
+        std.debug.print("{}: {} / {}\n", .{m, self.nodes.items[i].wins, self.nodes.items[i].sims});
+        if (self.nodes.items[i].sims > ms) {
+            ms = self.nodes.items[i].sims;
             mm = m;
-            //std.debug.print("{}: {}\n", .{mm, ms});
         }
         i += 1;
     }

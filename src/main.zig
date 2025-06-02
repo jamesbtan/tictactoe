@@ -27,7 +27,8 @@ pub fn main() !void {
     };
 
     var b: Board = .{};
-    const first = std.Random.boolean(rand);
+    //const first = std.Random.boolean(rand);
+    const first = true;
     var turn = false;
     while (true) {
         const r = players[@intFromBool(first != turn)].agent.move(&b);
